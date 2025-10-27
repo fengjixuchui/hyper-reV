@@ -1,27 +1,38 @@
 #include "arch.h"
-
-#include <intrin.h>
-
-#include "../memory_manager/memory_manager.h"
 #include "../crt/crt.h"
 
-#ifdef _INTELMACHINE
 #include <intrin.h>
+
+#ifdef _INTELMACHINE
 #include <ia32-doc/ia32.hpp>
+
+std::uint64_t vmread(const std::uint64_t field)
+{
+	std::uint64_t value = 0;
+
+	__vmx_vmread(field, &value);
+
+	return value;
+}
+
+void vmwrite(const std::uint64_t field, const std::uint64_t value)
+{
+	__vmx_vmwrite(field, value);
+}
 
 std::uint64_t get_vmexit_instruction_length()
 {
-#ifdef _INTELMACHINE
-	std::uint64_t vmexit_instruction_length = 0;
+	return vmread(VMCS_VMEXIT_INSTRUCTION_LENGTH);
+}
 
-	__vmx_vmread(VMCS_VMEXIT_INSTRUCTION_LENGTH, &vmexit_instruction_length);
+vmx_exit_qualification_ept_violation arch::get_exit_qualification()
+{
+	return { .flags = vmread(VMCS_EXIT_QUALIFICATION) };
+}
 
-	return vmexit_instruction_length;
-#else
-	vmcb_t* const vmcb = get_vmcb();
-
-	return vmcb->control.next_rip - vmcb->save_state.rip;
-#endif
+std::uint64_t arch::get_guest_physical_address()
+{
+	return vmread(VMCS_GUEST_PHYSICAL_ADDRESS);
 }
 
 #else
@@ -36,7 +47,7 @@ vmcb_t* arch::get_vmcb()
 	return get_vmcb_routine();
 }
 
-void arch::parse_vmcb_gadget(const std::uint8_t* get_vmcb_gadget)
+void arch::parse_vmcb_gadget(const std::uint8_t* const get_vmcb_gadget)
 {
 	constexpr std::uint32_t final_needed_opcode_offset = 23;
 
@@ -61,19 +72,15 @@ void arch::parse_vmcb_gadget(const std::uint8_t* get_vmcb_gadget)
 std::uint64_t arch::get_vmexit_reason()
 {
 #ifdef _INTELMACHINE
-	std::uint64_t vmexit_reason = 0;
-
-	__vmx_vmread(VMCS_EXIT_REASON, &vmexit_reason);
-
-	return vmexit_reason;
+	return vmread(VMCS_EXIT_REASON);
 #else
-	vmcb_t* const vmcb = get_vmcb();
+	const vmcb_t* const vmcb = get_vmcb();
 
 	return vmcb->control.vmexit_reason;
 #endif
 }
 
-std::uint8_t arch::is_cpuid(std::uint64_t vmexit_reason)
+std::uint8_t arch::is_cpuid(const std::uint64_t vmexit_reason)
 {
 #ifdef _INTELMACHINE
 	return vmexit_reason == VMX_EXIT_REASON_EXECUTE_CPUID;
@@ -82,7 +89,7 @@ std::uint8_t arch::is_cpuid(std::uint64_t vmexit_reason)
 #endif
 }
 
-std::uint8_t arch::is_slat_violation(std::uint64_t vmexit_reason)
+std::uint8_t arch::is_slat_violation(const std::uint64_t vmexit_reason)
 {
 #ifdef _INTELMACHINE
 	return vmexit_reason == VMX_EXIT_REASON_EPT_VIOLATION;
@@ -91,7 +98,7 @@ std::uint8_t arch::is_slat_violation(std::uint64_t vmexit_reason)
 #endif
 }
 
-std::uint8_t arch::is_non_maskable_interrupt_exit(std::uint64_t vmexit_reason)
+std::uint8_t arch::is_non_maskable_interrupt_exit(const std::uint64_t vmexit_reason)
 {
 #ifdef _INTELMACHINE
 	if (vmexit_reason != VMX_EXIT_REASON_EXCEPTION_OR_NMI)
@@ -99,11 +106,9 @@ std::uint8_t arch::is_non_maskable_interrupt_exit(std::uint64_t vmexit_reason)
 		return 0;
 	}
 
-	std::uint64_t raw_interruption_information = 0;
+	const std::uint64_t raw_interruption_information = vmread(VMCS_VMEXIT_INTERRUPTION_INFORMATION);
 
-	__vmx_vmread(VMCS_VMEXIT_INTERRUPTION_INFORMATION, &raw_interruption_information);
-
-	vmexit_interrupt_information interrupt_information = { .flags = static_cast<std::uint32_t>(raw_interruption_information) };
+	const vmexit_interrupt_information interrupt_information = { .flags = static_cast<std::uint32_t>(raw_interruption_information) };
 
 	return interrupt_information.interruption_type == interruption_type::non_maskable_interrupt;
 #else
@@ -113,12 +118,12 @@ std::uint8_t arch::is_non_maskable_interrupt_exit(std::uint64_t vmexit_reason)
 
 cr3 arch::get_guest_cr3()
 {
-	cr3 guest_cr3 = { };
+	cr3 guest_cr3;
 
 #ifdef _INTELMACHINE
-	__vmx_vmread(VMCS_GUEST_CR3, &guest_cr3.flags);
+	guest_cr3.flags = vmread(VMCS_GUEST_CR3);
 #else
-	vmcb_t* const vmcb = get_vmcb();
+	const vmcb_t* const vmcb = get_vmcb();
 
 	guest_cr3.flags = vmcb->save_state.cr3;
 #endif
@@ -126,25 +131,69 @@ cr3 arch::get_guest_cr3()
 	return guest_cr3;
 }
 
+cr3 arch::get_slat_cr3()
+{
+	cr3 slat_cr3;
+
+#ifdef _INTELMACHINE
+	slat_cr3.flags = vmread(VMCS_CTRL_EPT_POINTER);
+#else
+	const vmcb_t* const vmcb = arch::get_vmcb();
+
+	slat_cr3 = vmcb->control.nested_cr3;
+#endif
+
+	return slat_cr3;
+}
+
+void arch::set_slat_cr3(const cr3 slat_cr3)
+{
+#ifdef _INTELMACHINE
+	vmwrite(VMCS_CTRL_EPT_POINTER, slat_cr3.flags);
+#else
+	vmcb_t* const vmcb = arch::get_vmcb();
+
+	vmcb->control.nested_cr3 = slat_cr3;
+#endif
+}
+
+std::uint64_t arch::get_guest_rsp()
+{
+#ifdef _INTELMACHINE
+	return vmread(VMCS_GUEST_RSP);
+#else
+	const vmcb_t* const vmcb = get_vmcb();
+
+	return vmcb->save_state.rsp;
+#endif
+}
+
+void arch::set_guest_rsp(const std::uint64_t guest_rsp)
+{
+#ifdef _INTELMACHINE
+	vmwrite(VMCS_GUEST_RSP, guest_rsp);
+#else
+	vmcb_t* const vmcb = get_vmcb();
+
+	vmcb->save_state.rsp = guest_rsp;
+#endif
+}
+
 std::uint64_t arch::get_guest_rip()
 {
 #ifdef _INTELMACHINE
-	std::uint64_t guest_rip = 0;
-
-	__vmx_vmread(VMCS_GUEST_RIP, &guest_rip);
-
-	return guest_rip;
+	return vmread(VMCS_GUEST_RIP);
 #else
-	vmcb_t* const vmcb = get_vmcb();
+	const vmcb_t* const vmcb = get_vmcb();
 
 	return vmcb->save_state.rip;
 #endif
 }
 
-void arch::set_guest_rip(std::uint64_t guest_rip)
+void arch::set_guest_rip(const std::uint64_t guest_rip)
 {
 #ifdef _INTELMACHINE
-	__vmx_vmwrite(VMCS_GUEST_RIP, guest_rip);
+	vmwrite(VMCS_GUEST_RIP, guest_rip);
 #else
 	vmcb_t* const vmcb = get_vmcb();
 
@@ -155,15 +204,14 @@ void arch::set_guest_rip(std::uint64_t guest_rip)
 void arch::advance_guest_rip()
 {
 #ifdef _INTELMACHINE
-	std::uint64_t guest_rip = get_guest_rip();
+	const std::uint64_t guest_rip = get_guest_rip();
+	const std::uint64_t instruction_length = get_vmexit_instruction_length();
 
-	std::uint64_t instruction_length = get_vmexit_instruction_length();
-
-	std::uint64_t next_rip = guest_rip + instruction_length;
+	const std::uint64_t next_rip = guest_rip + instruction_length;
 #else
-	vmcb_t* const vmcb = get_vmcb();
+	const vmcb_t* const vmcb = get_vmcb();
 
-	std::uint64_t next_rip = vmcb->control.next_rip;
+	const std::uint64_t next_rip = vmcb->control.next_rip;
 #endif
 
 	set_guest_rip(next_rip);

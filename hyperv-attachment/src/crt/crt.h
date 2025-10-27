@@ -6,28 +6,28 @@ namespace crt
 	void copy_memory(void* destination, const void* source, std::uint64_t size);
 	void set_memory(void* destination, std::uint8_t value, std::uint64_t size);
 
-	template <class t>
-	t min(t a, t b)
+	template <class T>
+	T min(const T a, const T b)
 	{
 		return (a < b) ? a : b;
 	}
 
-	template <class t>
-	t max(t a, t b)
+	template <class T>
+	T max(const T a, const T b)
 	{
 		return (a < b) ? b : a;
 	}
 
-	template <class t>
-	t abs(t n)
+	template <class T>
+	T abs(const T n)
 	{
 		return (n < 0) ? -n : n;
 	}
 
-	template <class t>
-	void swap(t& a, t& b)
+	template <class T>
+	void swap(T& a, T& b) noexcept
 	{
-		t cache = a;
+		const T cache = a;
 
 		a = b;
 		b = cache;
@@ -35,36 +35,44 @@ namespace crt
 
 	class mutex_t
 	{
-	protected:
-		volatile std::int64_t value;
-
 	public:
-		mutex_t();
-		
 		void lock();
 		void release();
+
+	protected:
+		volatile std::int64_t value_ = 0;
 	};
 
 	class bitmap_t
 	{
-	protected:
-		constexpr static std::uint64_t bit_count_in_row = 64;
-
-		std::uint64_t* value = nullptr;
-		std::uint64_t value_count = 0;
-
-		std::uint64_t* get_row(std::uint64_t index) const;
-
 	public:
+		using size_type = std::uint64_t;
+
+		using value_type = std::uint64_t;
+		using pointer = value_type*;
+		using const_pointer = const value_type*;
+
+		using bit_type = std::uint8_t;
+
 		bitmap_t() = default;
 
 		void set_all() const;
-		void set(std::uint64_t index) const;
-		void clear(std::uint64_t index) const;
+		void set(value_type index) const;
 
-		std::uint8_t is_set(std::uint64_t index) const;
+		void clear(value_type index) const;
 
-		void set_map_value(std::uint64_t* value);
-		void set_map_value_count(std::uint64_t value_count);
+		[[nodiscard]] bit_type is_set(value_type index) const;
+
+		void set_value(pointer value);
+		void set_count(size_type value_count);
+
+	protected:
+		constexpr static size_type bit_count_in_row = sizeof(value_type) * 8;
+		constexpr static value_type value_max = ~static_cast<value_type>(0);
+
+		pointer value_ = nullptr;
+		size_type count_ = 0;
+
+		[[nodiscard]] pointer row(value_type index) const;
 	};
 }

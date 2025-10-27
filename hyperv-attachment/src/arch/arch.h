@@ -14,12 +14,22 @@ namespace arch
 
 	cr3 get_guest_cr3();
 
+	cr3 get_slat_cr3();
+	void set_slat_cr3(cr3 slat_cr3);
+
+	std::uint64_t get_guest_rsp();
+	void set_guest_rsp(std::uint64_t guest_rsp);
+
 	std::uint64_t get_guest_rip();
 	void set_guest_rip(std::uint64_t guest_rip);
 
 	void advance_guest_rip();
 
-#ifndef _INTELMACHINE
+#ifdef _INTELMACHINE
+	vmx_exit_qualification_ept_violation get_exit_qualification();
+
+	std::uint64_t get_guest_physical_address();
+#else
 	vmcb_t* get_vmcb();
 	void parse_vmcb_gadget(const std::uint8_t* get_vmcb_gadget);
 #endif

@@ -12,7 +12,7 @@ UINT8* hyperv_attachment_physical_base = NULL;
 UINT64 hyperv_attachment_heap_allocation_base = 0;
 UINT64 hyperv_attachment_heap_allocation_usable_base = 0;
 UINT64 hyperv_attachment_heap_allocation_size = 0;
-UINT32 hyperv_attachment_heap_4kb_pages_reserved = 512;
+UINT32 hyperv_attachment_heap_4kb_pages_reserved = 1024;
 
 #define d_hyperv_attachment_path L"\\efi\\microsoft\\boot\\hyperv-attachment.dll"
 

@@ -1,12 +1,9 @@
 #include "interrupts.h"
-#include "../slat/slat.h"
-#include "../crt/crt.h"
+#include "../memory_manager/heap_manager.h"
+#include "../slat/cr3/cr3.h"
 
 #include "ia32-doc/ia32.hpp"
-
 #include <intrin.h>
-
-#include "../memory_manager/heap_manager.h"
 
 extern "C"
 {
@@ -32,15 +29,15 @@ void set_up_nmi_handling()
         return;
     }
 
-    segment_descriptor_interrupt_gate_64* interrupt_gates = reinterpret_cast<segment_descriptor_interrupt_gate_64*>(idtr.base_address);
-    segment_descriptor_interrupt_gate_64* nmi_gate = &interrupt_gates[2];
+    const auto interrupt_gates = reinterpret_cast<segment_descriptor_interrupt_gate_64*>(idtr.base_address);
+    segment_descriptor_interrupt_gate_64* const nmi_gate = &interrupt_gates[2];
     segment_descriptor_interrupt_gate_64 new_gate = *nmi_gate;
 
     std::uint64_t new_handler = reinterpret_cast<std::uint64_t>(nmi_entry);
 
     if (new_gate.present == 0)
     {
-        segment_selector gate_segment_selector = { .index = 1 };
+        constexpr segment_selector gate_segment_selector = { .index = 1 };
 
         new_gate.segment_selector = gate_segment_selector.flags;
         new_gate.type = SEGMENT_DESCRIPTOR_TYPE_INTERRUPT_GATE;
@@ -62,10 +59,10 @@ void set_up_nmi_handling()
 
 void interrupts::set_up()
 {
-    constexpr std::uint64_t processor_nmi_state_count = 0x1000 / sizeof(std::uint64_t);
+    constexpr std::uint64_t processor_nmi_state_count = 0x1000 / sizeof(crt::bitmap_t::size_type);
 
-    processor_nmi_states.set_map_value(static_cast<std::uint64_t*>(heap_manager::allocate_page()));
-    processor_nmi_states.set_map_value_count(processor_nmi_state_count);
+    processor_nmi_states.set_value(static_cast<crt::bitmap_t::pointer>(heap_manager::allocate_page()));
+    processor_nmi_states.set_count(processor_nmi_state_count);
 
     apic = apic_t::create_instance();
 
@@ -89,7 +86,7 @@ void interrupts::clear_nmi_ready(const std::uint64_t apic_id)
     processor_nmi_states.clear(apic_id);
 }
 
-std::uint8_t interrupts::is_nmi_ready(const std::uint64_t apic_id)
+crt::bitmap_t::bit_type interrupts::is_nmi_ready(const std::uint64_t apic_id)
 {
     return processor_nmi_states.is_set(apic_id);
 }
@@ -100,7 +97,7 @@ void interrupts::process_nmi()
 
     if (is_nmi_ready(current_apic_id) == 1)
     {
-        slat::flush_current_logical_processor_slat_cache();
+        slat::flush_current_logical_processor_cache();
 
         clear_nmi_ready(current_apic_id);
     }
